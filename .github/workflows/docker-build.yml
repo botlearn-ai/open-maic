@@ -1,0 +1,117 @@
+name: Publish Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: ECR region(s) to publish
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - us
+          - cn
+
+env:
+  PUSH_REGION: ${{ inputs.region }}
+  ECR_US_REGISTRY: 928112001319.dkr.ecr.us-east-1.amazonaws.com
+  ECR_US_REGION: us-east-1
+  ECR_US_REPOSITORY: open/open-maic
+  ECR_CN_REGISTRY: 247328583315.dkr.ecr.cn-northwest-1.amazonaws.com.cn
+  ECR_CN_REGION: cn-northwest-1
+  ECR_CN_REPOSITORY: open/open-maic
+  PERSISTENCE_TOKEN: openmaic-gitops-persistence-v1
+
+concurrency:
+  group: publish-prod
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build & Push Prod
+    runs-on: self-hosted
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to US ECR
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        uses: ./.github/actions/ecr-login
+        with:
+          label: US
+          registry: ${{ env.ECR_US_REGISTRY }}
+          region: ${{ env.ECR_US_REGION }}
+          repository: ${{ env.ECR_US_REPOSITORY }}
+          access-key-id: ${{ secrets.AWS_US_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_US_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_US_SESSION_TOKEN }}
+          allow-ambient-credentials: "true"
+
+      - name: Log in to CN ECR
+        if: env.PUSH_REGION == 'cn' || env.PUSH_REGION == 'both'
+        uses: ./.github/actions/ecr-login
+        with:
+          label: CN
+          registry: ${{ env.ECR_CN_REGISTRY }}
+          region: ${{ env.ECR_CN_REGION }}
+          repository: ${{ env.ECR_CN_REPOSITORY }}
+          access-key-id: ${{ secrets.AWS_CN_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_CN_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_CN_SESSION_TOKEN }}
+
+      - name: Build once and push prod
+        shell: bash
+        run: |
+          tags=()
+
+          if [ "$PUSH_REGION" = "us" ] || [ "$PUSH_REGION" = "both" ]; then
+            tags+=(--tag "$ECR_US_REGISTRY/$ECR_US_REPOSITORY:prod")
+          fi
+
+          if [ "$PUSH_REGION" = "cn" ] || [ "$PUSH_REGION" = "both" ]; then
+            tags+=(--tag "$ECR_CN_REGISTRY/$ECR_CN_REPOSITORY:prod")
+          fi
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg NEXT_PUBLIC_PERSISTENCE=1 \
+            --build-arg NEXT_PUBLIC_PERSISTENCE_TOKEN="$PERSISTENCE_TOKEN" \
+            --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --provenance mode=max \
+            --sbom true \
+            "${tags[@]}" \
+            .
+
+      - name: Verify prod manifests
+        shell: bash
+        run: |
+          {
+            echo "## Prod image manifests"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$PUSH_REGION" = "us" ] || [ "$PUSH_REGION" = "both" ]; then
+            us_image="$ECR_US_REGISTRY/$ECR_US_REPOSITORY:prod"
+            docker buildx imagetools inspect "$us_image"
+            echo "- US: \`$us_image\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "$PUSH_REGION" = "cn" ] || [ "$PUSH_REGION" = "both" ]; then
+            cn_image="$ECR_CN_REGISTRY/$ECR_CN_REPOSITORY:prod"
+            docker buildx imagetools inspect "$cn_image"
+            echo "- CN: \`$cn_image\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
