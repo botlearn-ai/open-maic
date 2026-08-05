@@ -1,0 +1,125 @@
+name: Deploy Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: ECR region(s) to publish
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - us
+          - cn
+
+env:
+  PUSH_REGION: ${{ inputs.region || 'both' }}
+  ECR_US_REGISTRY: 928112001319.dkr.ecr.us-east-1.amazonaws.com
+  ECR_US_REGION: us-east-1
+  ECR_US_REPOSITORY: open/open-maic
+  ECR_CN_REGISTRY: 247328583315.dkr.ecr.cn-northwest-1.amazonaws.com.cn
+  ECR_CN_REGION: cn-northwest-1
+  ECR_CN_REPOSITORY: open/open-maic
+  PROJECT: open-maic
+  COMPOSE_FILE: /www/devops/deployments/test/open-maic/docker-compose.yaml
+  PERSISTENCE_TOKEN: openmaic-gitops-persistence-v1
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & Push & Deploy Test
+    runs-on: self-hosted
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_PERSISTENCE=1 \
+            --build-arg NEXT_PUBLIC_PERSISTENCE_TOKEN="$PERSISTENCE_TOKEN" \
+            -t "$PROJECT:test" \
+            .
+
+      - name: Log in to US ECR
+        id: ecr_us_login
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        uses: ./.github/actions/ecr-login
+        with:
+          label: US
+          registry: ${{ env.ECR_US_REGISTRY }}
+          region: ${{ env.ECR_US_REGION }}
+          repository: ${{ env.ECR_US_REPOSITORY }}
+          access-key-id: ${{ secrets.AWS_US_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_US_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_US_SESSION_TOKEN }}
+          allow-ambient-credentials: "true"
+
+      - name: Push to US ECR
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        run: |
+          docker tag "$PROJECT:test" "$ECR_US_REGISTRY/$ECR_US_REPOSITORY:test"
+          docker push "$ECR_US_REGISTRY/$ECR_US_REPOSITORY:test"
+
+      - name: Verify GitOps test configuration
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        run: |
+          expected_image="$ECR_US_REGISTRY/$ECR_US_REPOSITORY:test"
+          compose_images="$(docker compose -f "$COMPOSE_FILE" config --images)"
+
+          grep -Fxq "$expected_image" <<< "$compose_images" || {
+            echo "::error::GitOps config is not synchronized to $expected_image"
+            exit 1
+          }
+
+          git -C /www/devops diff --quiet -- deployments/test/open-maic || {
+            echo "::error::GitOps test configuration has server-local changes"
+            exit 1
+          }
+
+      - name: Deploy test
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        run: |
+          docker compose -f "$COMPOSE_FILE" pull open-maic
+          docker compose -f "$COMPOSE_FILE" up -d open-maic
+
+      - name: Health check
+        if: env.PUSH_REGION == 'us' || env.PUSH_REGION == 'both'
+        run: |
+          for _ in $(seq 1 40); do
+            if curl -fsS http://localhost:8055/api/health | grep -Eq '"success"[[:space:]]*:[[:space:]]*true'; then
+              echo "OpenMAIC Test is healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose -f "$COMPOSE_FILE" logs --tail=120 open-maic
+          exit 1
+
+      - name: Log in to CN ECR
+        id: ecr_cn_login
+        if: ${{ !cancelled() && (env.PUSH_REGION == 'cn' || env.PUSH_REGION == 'both') }}
+        uses: ./.github/actions/ecr-login
+        with:
+          label: CN
+          registry: ${{ env.ECR_CN_REGISTRY }}
+          region: ${{ env.ECR_CN_REGION }}
+          repository: ${{ env.ECR_CN_REPOSITORY }}
+          access-key-id: ${{ secrets.AWS_CN_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_CN_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_CN_SESSION_TOKEN }}
+
+      - name: Push to CN ECR
+        if: ${{ !cancelled() && steps.ecr_cn_login.outcome == 'success' && (env.PUSH_REGION == 'cn' || env.PUSH_REGION == 'both') }}
+        run: |
+          docker tag "$PROJECT:test" "$ECR_CN_REGISTRY/$ECR_CN_REPOSITORY:test"
+          docker push "$ECR_CN_REGISTRY/$ECR_CN_REPOSITORY:test"

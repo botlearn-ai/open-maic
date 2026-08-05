@@ -1280,7 +1280,7 @@ export const DEFAULT_TTS_VOICES: Record<BuiltInTTSProviderId, string> = {
   'glm-tts': 'tongtong',
   'qwen-tts': 'Cherry',
   'voxcpm-tts': VOXCPM_AUTO_VOICE_ID,
-  'doubao-tts': 'zh_female_vv_uranus_bigtts',
+  'doubao-tts': 'zh_female_xiaohe_uranus_bigtts',
   'elevenlabs-tts': 'EXAVITQu4vr4xnSDxMaL',
   'minimax-tts': 'female-yujie',
   'lemonade-tts': 'af_heart',
