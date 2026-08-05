@@ -551,7 +551,7 @@ function HomePage() {
 
       {/* ═══ Hero section: title + input (centered, wider) ═══ */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
         className={cn(
@@ -563,7 +563,7 @@ function HomePage() {
         <motion.img
           src="/logo-horizontal.png"
           alt="OpenMAIC"
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={false}
           animate={{ opacity: 1, scale: 1 }}
           transition={{
             delay: 0.1,
@@ -576,7 +576,7 @@ function HomePage() {
 
         {/* ── Slogan ── */}
         <motion.p
-          initial={{ opacity: 0 }}
+          initial={false}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.25 }}
           className="text-sm text-muted-foreground/60 mb-8"
@@ -586,7 +586,7 @@ function HomePage() {
 
         {/* ── Unified input area ── */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
+          initial={false}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.35 }}
           className="w-full"
