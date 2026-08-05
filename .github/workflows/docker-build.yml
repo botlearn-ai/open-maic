@@ -40,9 +40,6 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -85,7 +82,7 @@ jobs:
           fi
 
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/arm64 \
             --build-arg NEXT_PUBLIC_PERSISTENCE=1 \
             --build-arg NEXT_PUBLIC_PERSISTENCE_TOKEN="$PERSISTENCE_TOKEN" \
             --push \
