@@ -49,6 +49,20 @@ describe('China Test deployment workflow', () => {
     expect(cnJob).toContain('source-directory: .');
   });
 
+  test('removes buildx before deleting its isolated Docker config', () => {
+    const setup = cnJob
+      .split('- name: Set up Docker Buildx', 2)[1]
+      .split('- name: Log in to China ECR', 2)[0];
+    const cleanup = cnJob.split('- name: Cleanup isolated Docker state', 2)[1];
+
+    expect(setup).toContain('id: buildx');
+    expect(setup).toContain('cleanup: false');
+    expect(setup).toContain('cache-binary: false');
+    expect(cleanup.indexOf('docker buildx rm "${{ steps.buildx.outputs.name }}"')).toBeLessThan(
+      cleanup.indexOf('rm -rf -- "$DOCKER_CONFIG"'),
+    );
+  });
+
   test('keeps the legacy manual publisher US-only', () => {
     const dispatch = legacy.split('workflow_dispatch:', 2)[1].split('env:', 2)[0];
     expect(dispatch).toContain('default: us');
