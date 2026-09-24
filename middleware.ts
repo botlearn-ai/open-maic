@@ -12,6 +12,16 @@ function bufToHex(buf: ArrayBuffer): string {
     .join('');
 }
 
+/** Constant-length comparison (not truly constant-time in JS, but sufficient here) */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 /** Verify an HMAC-signed token using Web Crypto API (Edge-compatible) */
 async function verifyToken(token: string, accessCode: string): Promise<boolean> {
   const dotIndex = token.indexOf('.');
@@ -32,13 +42,24 @@ async function verifyToken(token: string, accessCode: string): Promise<boolean> 
   const data = encode(timestamp);
   const expected = bufToHex(await crypto.subtle.sign('HMAC', key, data.buffer as ArrayBuffer));
 
-  // Constant-length comparison (not truly constant-time in JS, but sufficient here)
-  if (signature.length !== expected.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < signature.length; i++) {
-    mismatch |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-  return mismatch === 0;
+  return safeEqual(signature, expected);
+}
+
+/**
+ * Authenticate a request via the `Authorization: Bearer <token>` header,
+ * where the token is either the raw access code (for API clients) or an
+ * HMAC-signed token issued by /api/access-code/verify.
+ */
+async function verifyAuthorizationHeader(
+  header: string | null,
+  accessCode: string,
+): Promise<boolean> {
+  if (!header?.startsWith('Bearer ')) return false;
+  const token = header.substring('Bearer '.length).trim();
+  if (!token) return false;
+
+  if (safeEqual(token, accessCode)) return true;
+  return verifyToken(token, accessCode);
 }
 
 export async function middleware(request: NextRequest) {
@@ -57,6 +78,11 @@ export async function middleware(request: NextRequest) {
   // Check cookie — validate HMAC signature, not just existence
   const cookie = request.cookies.get('openmaic_access');
   if (cookie?.value && (await verifyToken(cookie.value, accessCode))) {
+    return NextResponse.next();
+  }
+
+  // Check Authorization header — lets API clients authenticate without the cookie flow
+  if (await verifyAuthorizationHeader(request.headers.get('authorization'), accessCode)) {
     return NextResponse.next();
   }
 

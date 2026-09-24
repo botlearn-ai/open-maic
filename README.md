@@ -376,6 +376,68 @@ TTS_VOXCPM_BASE_URL=http://localhost:8000/v1
 - **Prompt voice**: describe the voice in natural language, e.g. *"warm female teacher voice, calm and encouraging, mid-pitch"*.
 - **Clone voice**: upload a short reference audio clip or record one in the browser. The clip is stored in IndexedDB and sent to your VoxCPM backend on each synthesis.
 
+### Create Courses via the API
+
+Courses can be created programmatically — no browser required. Generation runs entirely server-side using the providers configured in `.env.local` / `server-providers.yml`.
+
+**Authentication.** If the deployment has no `ACCESS_CODE`, the API is open. If `ACCESS_CODE` is set, include it as a Bearer token on every request:
+
+```
+Authorization: Bearer <ACCESS_CODE>
+```
+
+**1. (Optional) Check server capabilities.** Only enable a feature flag if the server supports it:
+
+```bash
+curl -s http://localhost:3000/api/health
+# → { "success": true, "capabilities": { "webSearch": true, "imageGeneration": false, "videoGeneration": false, "tts": true } }
+```
+
+**2. Submit a generation job.**
+
+```bash
+curl -s -X POST http://localhost:3000/api/generate-classroom \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS_CODE" \
+  -d '{"requirement": "An introductory course on quantum mechanics for high school students"}'
+# → 202 { "success": true, "jobId": "abc123XYZ0", "status": "queued", "pollUrl": "...", "pollIntervalMs": 5000 }
+```
+
+Request body fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `requirement` | string (required) | What the course should teach |
+| `pdfContent` | `{ text, images }` | Parsed source material (see `POST /api/parse-pdf`) |
+| `enableWebSearch` | boolean | Ground the outline in web search results |
+| `enableImageGeneration` | boolean | Generate slide images |
+| `enableVideoGeneration` | boolean | Generate slide videos |
+| `enableTTS` | boolean | Pre-generate speech audio |
+| `agentMode` | `"default"` \| `"generate"` | Use built-in agents, or generate course-specific agent personas |
+
+All optional booleans default to `false`.
+
+**3. Poll until done.**
+
+```bash
+curl -s http://localhost:3000/api/generate-classroom/abc123XYZ0 \
+  -H "Authorization: Bearer $ACCESS_CODE"
+```
+
+Poll every ~5 seconds (`pollIntervalMs`) until `status` is `succeeded` or `failed`. On success, the response contains the course:
+
+```json
+{
+  "success": true,
+  "status": "succeeded",
+  "result": { "classroomId": "Uyh82Y32ZK", "url": "http://localhost:3000/classroom/Uyh82Y32ZK" }
+}
+```
+
+Open `result.url` to play the course.
+
+**Importing pre-built content.** If you already have a complete course document (a `stage` plus its `scenes`, e.g. produced with the [`@openmaic/dsl`](packages/@openmaic/dsl) SDK or exported from another instance), persist it directly without generation via `POST /api/classroom` with body `{ "stage": ..., "scenes": [...] }` — the response returns the course `id` and `url`.
+
 ---
 
 ## ✨ Features

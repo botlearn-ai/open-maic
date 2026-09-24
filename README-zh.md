@@ -302,6 +302,68 @@ TTS_VOXCPM_BASE_URL=http://localhost:8000/v1
 - **Prompt 音色**：用自然语言描述音色，例如 *"温暖的女性教师嗓音，平静而鼓励，中等音调"*。
 - **Clone 音色**：上传一段参考音频或在浏览器里录一段。音频存在 IndexedDB 中，每次合成时发给后端。
 
+### 通过 API 创建课程
+
+课程可以完全通过 API 以编程方式创建，无需浏览器。生成过程全部在服务端完成，使用 `.env.local` / `server-providers.yml` 中配置的模型服务商。
+
+**认证。** 部署未设置 `ACCESS_CODE` 时，API 无需认证；设置了 `ACCESS_CODE` 时，每个请求都需携带 Bearer 请求头：
+
+```
+Authorization: Bearer <ACCESS_CODE>
+```
+
+**1.（可选）探测服务端能力。** 只在服务端支持对应能力时才开启相应开关：
+
+```bash
+curl -s http://localhost:3000/api/health
+# → { "success": true, "capabilities": { "webSearch": true, "imageGeneration": false, "videoGeneration": false, "tts": true } }
+```
+
+**2. 提交生成任务。**
+
+```bash
+curl -s -X POST http://localhost:3000/api/generate-classroom \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS_CODE" \
+  -d '{"requirement": "面向高中生的量子力学入门课程"}'
+# → 202 { "success": true, "jobId": "abc123XYZ0", "status": "queued", "pollUrl": "...", "pollIntervalMs": 5000 }
+```
+
+请求体字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `requirement` | string（必填） | 课程需求描述 |
+| `pdfContent` | `{ text, images }` | 解析后的课程材料（见 `POST /api/parse-pdf`） |
+| `enableWebSearch` | boolean | 大纲生成时引入联网搜索结果 |
+| `enableImageGeneration` | boolean | 生成幻灯片配图 |
+| `enableVideoGeneration` | boolean | 生成幻灯片视频 |
+| `enableTTS` | boolean | 预生成语音音频 |
+| `agentMode` | `"default"` \| `"generate"` | 使用内置智能体，或为课程定制生成智能体人设 |
+
+所有可选布尔字段默认为 `false`。
+
+**3. 轮询直到完成。**
+
+```bash
+curl -s http://localhost:3000/api/generate-classroom/abc123XYZ0 \
+  -H "Authorization: Bearer $ACCESS_CODE"
+```
+
+按 `pollIntervalMs`（约 5 秒）的间隔轮询，直到 `status` 变为 `succeeded` 或 `failed`。成功后响应中包含课程信息：
+
+```json
+{
+  "success": true,
+  "status": "succeeded",
+  "result": { "classroomId": "Uyh82Y32ZK", "url": "http://localhost:3000/classroom/Uyh82Y32ZK" }
+}
+```
+
+打开 `result.url` 即可播放课程。
+
+**导入已构建好的课程。** 如果你已经有完整的课程文档（`stage` 及其 `scenes`，例如用 [`@openmaic/dsl`](packages/@openmaic/dsl) SDK 构建或从其他实例导出），可以跳过生成，直接 `POST /api/classroom`（body 为 `{ "stage": ..., "scenes": [...] }`）持久化，响应返回课程 `id` 和 `url`。
+
 ---
 
 ## ✨ 功能特性
